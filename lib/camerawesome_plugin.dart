@@ -42,6 +42,22 @@ class CamerawesomePlugin {
   static const EventChannel _physicalButtonChannel =
       EventChannel('camerawesome/physical_button');
 
+  /// LOCAL PATCH (roots): AVCaptureSession lifecycle (Roots#504).
+  ///
+  /// Upstream reports nothing about whether a session actually started. A
+  /// multi-camera session that never runs, or that is torn down immediately for
+  /// exceeding the hardware budget, looks exactly like a working one from Dart:
+  /// setupCamera returns success unconditionally and start() is fired unawaited
+  /// and uncaught (camera_awesome_builder.dart). The result is two black
+  /// previews and nothing in the logs.
+  ///
+  /// Upstream fix: expose the session's own notifications for the single and
+  /// multi camera classes both, and on Android the CameraX equivalent. This
+  /// fork wires the iOS multi-camera path only, which is the one Roots uses for
+  /// dual capture.
+  static const EventChannel _sessionEventsChannel =
+      EventChannel('camerawesome/session_events');
+
   static Stream<CameraOrientations>? _orientationStream;
 
   static Stream<CameraPhysicalButton>? _physicalButtonStream;
@@ -49,6 +65,9 @@ class CamerawesomePlugin {
   static Stream<bool>? _permissionsStream;
 
   static Stream<Map<String, dynamic>>? _imagesStream;
+
+  /// LOCAL PATCH (roots): Roots#504.
+  static Stream<Map<String, dynamic>>? _sessionEventsStream;
 
   static CameraRunningState currentState = CameraRunningState.stopped;
 
@@ -135,6 +154,32 @@ class CamerawesomePlugin {
       sink.add(physicalButton!);
     }));
     return _physicalButtonStream;
+  }
+
+  /// LOCAL PATCH (roots): see [_sessionEventsChannel] (Roots#504).
+  ///
+  /// Each event is a map with a `type`, one of:
+  ///   - `sensorsAttached`  : `attachedSensors` / `requestedSensors` counts,
+  ///                          emitted once as the session is configured;
+  ///   - `sessionDidStartRunning` : the session is actually running;
+  ///   - `sessionRuntimeError`    : `code` + `message`;
+  ///   - `sessionWasInterrupted`  : `reason`
+  ///     (AVCaptureSessionInterruptionReason).
+  ///
+  /// iOS multi-camera only for now. Nothing is emitted on Android or on the
+  /// single-camera path, so a caller must treat silence as "no information"
+  /// rather than as failure.
+  static Stream<Map<String, dynamic>>? listenSessionEvents() {
+    _sessionEventsStream ??=
+        _sessionEventsChannel.receiveBroadcastStream('sessionEventsChannel')
+            .transform(
+      StreamTransformer<dynamic, Map<String, dynamic>>.fromHandlers(
+        handleData: (data, sink) {
+          sink.add(Map<String, dynamic>.from(data as Map));
+        },
+      ),
+    );
+    return _sessionEventsStream;
   }
 
   static Stream<bool>? listenPermissionResult() {

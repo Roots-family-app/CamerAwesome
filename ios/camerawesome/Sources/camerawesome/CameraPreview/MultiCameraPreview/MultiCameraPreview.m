@@ -55,6 +55,10 @@
 }
 
 - (void)dispose {
+  // LOCAL PATCH (roots): drop the session observers added in
+  // configInitialSession (Roots#504) before the session goes away.
+  [self stopObservingSession];
+  self.onSessionEvent = nil;
   [self stop];
   [self cleanSession];
 }
@@ -221,9 +225,76 @@
     [self.textures addObject:previewTexture];
   }
   
+  // LOCAL PATCH (roots): observe the session's own lifecycle (Roots#504).
+  // Without this the only signal the Dart side ever gets is "setupCamera
+  // returned", which is true whether or not the session ever ran a frame.
+  // Upstream should do this in both camera classes and expose it through the
+  // plugin's event channels.
+  [self startObservingSession];
+  
   [self setSensors:sensors];
   
   [self.cameraSession commitConfiguration];
+}
+
+// LOCAL PATCH (roots): the three notifications that distinguish "the session
+// is running" from "the session died on the way up" (Roots#504). Upstream
+// observes none of them.
+- (void)startObservingSession {
+  NSNotificationCenter *center = [NSNotificationCenter defaultCenter];
+  [center addObserver:self
+             selector:@selector(handleSessionDidStartRunning:)
+                 name:AVCaptureSessionDidStartRunningNotification
+               object:self.cameraSession];
+  [center addObserver:self
+             selector:@selector(handleSessionRuntimeError:)
+                 name:AVCaptureSessionRuntimeErrorNotification
+               object:self.cameraSession];
+  [center addObserver:self
+             selector:@selector(handleSessionWasInterrupted:)
+                 name:AVCaptureSessionWasInterruptedNotification
+               object:self.cameraSession];
+}
+
+- (void)stopObservingSession {
+  [[NSNotificationCenter defaultCenter] removeObserver:self];
+}
+
+- (void)emitSessionEvent:(NSDictionary<NSString *, id> *)event {
+  void (^sink)(NSDictionary<NSString *, id> *) = self.onSessionEvent;
+  if (sink == nil) {
+    return;
+  }
+  // Flutter event sinks must be fed from the platform thread; these
+  // notifications arrive on whichever queue AVFoundation used.
+  dispatch_async(dispatch_get_main_queue(), ^{
+    sink(event);
+  });
+}
+
+- (void)handleSessionDidStartRunning:(NSNotification *)notification {
+  [self emitSessionEvent:@{
+    @"type" : @"sessionDidStartRunning",
+    @"attachedSensors" : @(self.attachedSensorCount),
+    @"requestedSensors" : @(self.requestedSensorCount),
+  }];
+}
+
+- (void)handleSessionRuntimeError:(NSNotification *)notification {
+  NSError *error = notification.userInfo[AVCaptureSessionErrorKey];
+  [self emitSessionEvent:@{
+    @"type" : @"sessionRuntimeError",
+    @"code" : @(error != nil ? error.code : 0),
+    @"message" : error.localizedDescription ?: @"unknown runtime error",
+  }];
+}
+
+- (void)handleSessionWasInterrupted:(NSNotification *)notification {
+  NSNumber *reason = notification.userInfo[AVCaptureSessionInterruptionReasonKey];
+  [self emitSessionEvent:@{
+    @"type" : @"sessionWasInterrupted",
+    @"reason" : reason ?: @(-1),
+  }];
 }
 
 - (void)setSensors:(NSArray<PigeonSensor *> *)sensors {
@@ -231,10 +302,21 @@
   
   _sensors = sensors;
   
+  // LOCAL PATCH (roots): keep addSensor's answer (Roots#504). Upstream called
+  // it for its side effects and discarded the BOOL, so a sensor that resolved
+  // to no device -- which is what happens when the requested type is absent,
+  // or when the multi-cam hardware budget is already spent -- left a session
+  // that reported success and rendered black. Upstream should return this out
+  // of setSensors and fail setupCamera when nothing attached.
+  NSInteger attached = 0;
   for (int i = 0; i < [sensors count]; i++) {
     PigeonSensor *sensor = sensors[i];
-    [self addSensor:sensor withIndex:i];
+    if ([self addSensor:sensor withIndex:i]) {
+      attached++;
+    }
   }
+  _requestedSensorCount = (NSInteger)[sensors count];
+  _attachedSensorCount = attached;
   
   [self.cameraSession commitConfiguration];
 }
@@ -245,9 +327,46 @@
   });
 }
 
+// LOCAL PATCH (roots): upstream hardcoded `return CGSizeMake(1920, 1080)`
+// behind a `// TODO`, so every multi-camera preview was told it was 16:9 no
+// matter what the sensor actually streams. The Flutter side scales the texture
+// to that claimed size (AnimatedPreviewFit / PreviewSizeCalculator), so a 4:3
+// stream got squeezed into a 16:9 box: the preview looked zoomed and stretched
+// while the captured file, which goes through CameraPictureController with the
+// real frame, did not. SingleCameraPreview already does this correctly by
+// tracking _currentPreviewSize (SingleCameraPreview.m).
+//
+// Upstream fix: track the real stream size per device the way the single-camera
+// class does, and drop the index-less variant.
+//
+// Returned landscape (width > height) to match SingleCameraPreview's
+// convention; CamerawesomePlugin.m swaps the axes on the way to Dart because
+// the camera is always portrait.
 - (CGSize)getEffectivPreviewSize {
-  // TODO
-  return CGSizeMake(1920, 1080);
+  return [self getEffectivPreviewSizeAtIndex:0];
+}
+
+- (CGSize)getEffectivPreviewSizeAtIndex:(int)index {
+  if (index < 0 || index >= (int)[self.devices count]) {
+    // No device for that index (the session failed to add a sensor, or Dart
+    // asked about a texture that never attached). 16:9 is the historical
+    // upstream answer and keeps the preview laying out rather than dividing
+    // by zero.
+    return CGSizeMake(1920, 1080);
+  }
+
+  AVCaptureDevice *device = self.devices[index].device;
+  AVCaptureDeviceFormat *format = device.activeFormat;
+  if (format == nil) {
+    return CGSizeMake(1920, 1080);
+  }
+
+  CMVideoDimensions dimensions = CMVideoFormatDescriptionGetDimensions(format.formatDescription);
+  if (dimensions.width <= 0 || dimensions.height <= 0) {
+    return CGSizeMake(1920, 1080);
+  }
+
+  return CGSizeMake(dimensions.width, dimensions.height);
 }
 
 - (BOOL)addSensor:(PigeonSensor *)sensor withIndex:(int)index {
@@ -343,6 +462,39 @@
 }
 
 - (void)takePhotoSensors:(nonnull NSArray<PigeonSensor *> *)sensors paths:(nonnull NSArray<NSString *> *)paths completion:(nonnull void (^)(NSNumber * _Nullable, FlutterError * _Nullable))completion {
+  // LOCAL PATCH (roots): one completion per request (Roots#504).
+  //
+  // Upstream handed the SAME `completion` block to every
+  // CameraPictureController AND called `completion(@(YES), nil)` again from
+  // each one's callback, so an N-sensor capture called back up to 2N times for
+  // one shutter press. The Dart side treats each call as a finished capture,
+  // so one press became several moments. Dart now also guards against replay
+  // (moment_screen.dart), because the same shape exists on the Android path.
+  //
+  // Upstream fix: give each CameraPictureController its own per-sensor
+  // completion, join them, and call the caller's completion once when the last
+  // one lands (with the first error, if any).
+  __block BOOL didComplete = NO;
+  __block NSInteger remaining = (NSInteger)[sensors count];
+  void (^completeOnce)(NSNumber * _Nullable, FlutterError * _Nullable) =
+  ^(NSNumber * _Nullable result, FlutterError * _Nullable error) {
+    @synchronized (self) {
+      if (didComplete) {
+        return;
+      }
+      // An error ends the request immediately; a success only ends it once
+      // every sensor has reported.
+      if (error == nil) {
+        remaining--;
+        if (remaining > 0) {
+          return;
+        }
+      }
+      didComplete = YES;
+    }
+    completion(result, error);
+  };
+  
   for (int i = 0; i < [sensors count]; i++) {
     PigeonSensor *sensor = [sensors objectAtIndex:i];
     NSString *path = [paths objectAtIndex:i];
@@ -354,7 +506,7 @@
                                                                            saveGPSLocation:_saveGPSLocation
                                                                          mirrorFrontCamera:_mirrorFrontCamera
                                                                                aspectRatio:_aspectRatio
-                                                                                completion:completion
+                                                                                completion:completeOnce
                                                                                   callback:^{
       // If flash mode is always on, restore it back after photo is taken
       if (self->_torchMode == AVCaptureTorchModeOn) {
@@ -363,7 +515,7 @@
         [self->_devices.firstObject.device unlockForConfiguration];
       }
       
-      completion(@(YES), nil);
+      completeOnce(@(YES), nil);
     }];
     
     // Create settings instance

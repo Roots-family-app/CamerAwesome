@@ -52,6 +52,11 @@ class AwesomeCameraPreview extends StatefulWidget {
 class AwesomeCameraPreviewState extends State<AwesomeCameraPreview> {
   PreviewSize? _previewSize;
 
+  /// LOCAL PATCH (roots): the real stream size of every attached sensor, not
+  /// just the primary. Index i lines up with `_textures[i]`. Upstream only ever
+  /// asked for index 0 and the floating previews invented their own size.
+  final List<PreviewSize?> _previewSizes = [];
+
   final List<Texture> _textures = [];
 
   PreviewSize? get pixelPreviewSize => _previewSize;
@@ -121,6 +126,9 @@ class AwesomeCameraPreviewState extends State<AwesomeCameraPreview> {
           _textures.add(
             Texture(textureId: textureId),
           );
+          // LOCAL PATCH (roots): keep _previewSizes index-aligned with
+          // _textures on this debug branch too.
+          _previewSizes.add(null);
         }
       }
     } else {
@@ -130,6 +138,16 @@ class AwesomeCameraPreviewState extends State<AwesomeCameraPreview> {
           _textures.add(
             Texture(textureId: textureId),
           );
+          // LOCAL PATCH (roots): fetch this sensor's real preview size next to
+          // its texture, so _buildPreviewTextures can hand the floating preview
+          // a truthful size instead of guessing one.
+          PreviewSize? size;
+          try {
+            size = await widget.state.previewSize(i);
+          } catch (_) {
+            size = null;
+          }
+          _previewSizes.add(size);
         }
       }
     }
@@ -250,6 +268,8 @@ class AwesomeCameraPreviewState extends State<AwesomeCameraPreview> {
         sensor: sensor,
         texture: texture,
         aspectRatio: 1 / _aspectRatioValue!,
+        // LOCAL PATCH (roots): the real size of THIS sensor's stream.
+        previewSize: i < _previewSizes.length ? _previewSizes[i] : null,
         pictureInPictureConfig:
             widget.pictureInPictureConfigBuilder?.call(i, sensor) ??
                 PictureInPictureConfig(

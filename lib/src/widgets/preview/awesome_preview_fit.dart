@@ -4,7 +4,12 @@ import 'package:camerawesome/camerawesome_plugin.dart';
 import 'package:camerawesome/pigeon.dart';
 import 'package:flutter/material.dart';
 
-final previewWidgetKey = GlobalKey();
+// EXPERIMENT (roots): was a module-level GlobalKey singleton attached to the
+// InteractiveViewer below. Multi-camera mounts AnimatedPreviewFit twice, once
+// for the full-screen preview and once for the PiP overlay, so both attached
+// the same key and Flutter rejected the tree. Nothing in this package reads
+// the key, and the InteractiveViewer does not need one: scaleEnabled and
+// panEnabled are both false. Removed to let SensorConfig.multiple() mount.
 
 typedef OnPreviewCalculated = void Function(AnalysisPreview preview);
 
@@ -156,7 +161,6 @@ class PreviewFitWidget extends StatelessWidget {
         child: Padding(
           padding: previewPadding ?? EdgeInsets.zero,
           child: InteractiveViewer(
-            key: previewWidgetKey,
             transformationController: transformController,
             scaleEnabled: false,
             constrained: false,

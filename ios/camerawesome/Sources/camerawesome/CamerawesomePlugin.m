@@ -13,6 +13,10 @@ FlutterEventSink orientationEventSink;
 FlutterEventSink videoRecordingEventSink;
 FlutterEventSink imageStreamEventSink;
 FlutterEventSink physicalButtonEventSink;
+// LOCAL PATCH (roots): the sink for camerawesome/session_events (Roots#504).
+// Upstream has no channel for AVCaptureSession lifecycle at all, which is why
+// a camera that never started was invisible to Dart.
+FlutterEventSink sessionEventSink;
 
 @interface CamerawesomePlugin () <CameraInterface, AnalysisImageUtils>
 @property(readonly, nonatomic) NSObject<FlutterTextureRegistry> *textureRegistry;
@@ -55,9 +59,15 @@ FlutterEventSink physicalButtonEventSink;
                                                                       binaryMessenger:[registrar messenger]];
   FlutterEventChannel *physicalButtonChannel = [FlutterEventChannel eventChannelWithName:@"camerawesome/physical_button"
                                                                          binaryMessenger:[registrar messenger]];
+  // LOCAL PATCH (roots): session lifecycle channel (Roots#504). Upstream fix
+  // is to expose AVCaptureSession's own notifications for both the single and
+  // the multi camera classes instead of swallowing them.
+  FlutterEventChannel *sessionEventsChannel = [FlutterEventChannel eventChannelWithName:@"camerawesome/session_events"
+                                                                        binaryMessenger:[registrar messenger]];
   [orientationChannel setStreamHandler:instance];
   [imageStreamChannel setStreamHandler:instance];
   [physicalButtonChannel setStreamHandler:instance];
+  [sessionEventsChannel setStreamHandler:instance];
   
   CameraInterfaceSetup(registrar.messenger, instance);
   AnalysisImageUtilsSetup(registrar.messenger, instance);
@@ -105,6 +115,33 @@ FlutterEventSink physicalButtonEventSink;
                                                    aspectRatioMode:aspectRatioMode
                                                        captureMode:captureModeType
                                                      dispatchQueue:dispatch_queue_create("camerawesome.multi_preview.dispatchqueue", NULL)];
+    
+    // LOCAL PATCH (roots): report what actually attached (Roots#504).
+    //
+    // Upstream fell straight through to `completion(@(YES), nil)` below no
+    // matter what happened here, so a session that attached one camera of two,
+    // or none at all, was reported to Dart as a success. Zero attached is not
+    // a camera and is refused; a partial attach is surfaced as an event so
+    // Dart can log "one camera instead of two" rather than guess at a black
+    // preview.
+    //
+    // Upstream fix: make setSensors' result part of setupCamera's contract.
+    [self attachSessionEventSink];
+    if (self.multiCamera.attachedSensorCount == 0) {
+      [self.multiCamera dispose];
+      self.multiCamera = nil;
+      completion(nil, [FlutterError errorWithCode:@"SENSOR_ATTACH_FAILED"
+                                          message:@"no requested sensor could be attached to the multi-camera session"
+                                          details:nil]);
+      return;
+    }
+    if (sessionEventSink != nil) {
+      sessionEventSink(@{
+        @"type" : @"sensorsAttached",
+        @"attachedSensors" : @(self.multiCamera.attachedSensorCount),
+        @"requestedSensors" : @(self.multiCamera.requestedSensorCount),
+      });
+    }
     
     for (int i = 0; i < [sensors count]; i++) {
       int64_t textureId = [self->_textureRegistry registerTexture:self.multiCamera.textures[i]];
@@ -230,9 +267,32 @@ FlutterEventSink physicalButtonEventSink;
     if (self.camera != nil) {
       [self.camera setPhysicalButtonEventSink:physicalButtonEventSink];
     }
+  } else if ([arguments  isEqual: @"sessionEventsChannel"]) {
+    // LOCAL PATCH (roots): Roots#504.
+    sessionEventSink = eventSink;
+    [self attachSessionEventSink];
   }
   
   return nil;
+}
+
+// LOCAL PATCH (roots): forward the multi-camera session's lifecycle to the
+// session_events sink (Roots#504). Kept in one place so both the listen path
+// and setupCamera wire the same thing.
+- (void)attachSessionEventSink {
+  if (self.multiCamera == nil) {
+    return;
+  }
+  if (sessionEventSink == nil) {
+    self.multiCamera.onSessionEvent = nil;
+    return;
+  }
+  self.multiCamera.onSessionEvent = ^(NSDictionary<NSString *, id> *event) {
+    FlutterEventSink sink = sessionEventSink;
+    if (sink != nil) {
+      sink(event);
+    }
+  };
 }
 
 - (FlutterError *)onCancelWithArguments:(NSString *)arguments {
@@ -254,6 +314,10 @@ FlutterEventSink physicalButtonEventSink;
     if (self.camera != nil) {
       [self.camera setPhysicalButtonEventSink:physicalButtonEventSink];
     }
+  } else if ([arguments  isEqual: @"sessionEventsChannel"]) {
+    // LOCAL PATCH (roots): Roots#504.
+    sessionEventSink = nil;
+    [self attachSessionEventSink];
   }
   return nil;
 }
@@ -594,7 +658,11 @@ FlutterEventSink physicalButtonEventSink;
   
   CGSize previewSize;
   if (self.multiCamera != nil) {
-    previewSize = [self.multiCamera getEffectivPreviewSize];
+    // LOCAL PATCH (roots): honour the index. Upstream discarded it here, so
+    // every sensor in a multi-camera session reported the primary's size (and
+    // that was itself a 1920x1080 constant). The floating PiP preview is the
+    // caller that actually needs a non-zero index.
+    previewSize = [self.multiCamera getEffectivPreviewSizeAtIndex:[index intValue]];
   } else {
     previewSize = [self.camera getEffectivPreviewSize];
   }
