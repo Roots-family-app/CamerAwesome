@@ -337,13 +337,8 @@ data class CameraXState(
         }
     }
 
-    fun setZoom(normalizedZoom: Float) {
-        val clampedZoom = normalizedZoom.coerceIn(0f, 1f)
-        val zoomState = mainCameraInfos.zoomState.value ?: return
-        val minZoomRatio = zoomState.minZoomRatio
-        val maxZoomRatio = zoomState.maxZoomRatio
-        val targetZoomRatio = minZoomRatio + (maxZoomRatio - minZoomRatio) * clampedZoom
-        mainCameraControl.setZoomRatio(targetZoomRatio)
+    fun setLinearZoom(zoom: Float) {
+        mainCameraControl.setLinearZoom(zoom)
     }
 
     fun startFocusAndMetering(autoFocusAction: FocusMeteringAction) {

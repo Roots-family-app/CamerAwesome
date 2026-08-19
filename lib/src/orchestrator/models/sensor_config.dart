@@ -1,7 +1,6 @@
 // ignore_for_file: close_sinks
 
 import 'dart:async';
-import 'dart:io';
 
 import 'package:camerawesome/camerawesome_plugin.dart';
 import 'package:rxdart/rxdart.dart';
@@ -101,26 +100,6 @@ class SensorConfig {
 
   /// Returns the current zoom without stream
   double get zoom => _zoomController.value;
-
-  /// Resets zoom to 1.0x optical zoom on Android.
-  /// Calculates the normalized linear zoom value that maps to 1.0x
-  /// based on the camera's min/max zoom ratios.
-  /// If [onlyIfUnset] is true, only resets when zoom is still at 0.0
-  /// (used for initial startup).
-  Future<void> setZoomToOneX({bool onlyIfUnset = false}) async {
-    if (!Platform.isAndroid) return;
-    if (onlyIfUnset && zoom != 0.0) return;
-    final minZoom = await CamerawesomePlugin.getMinZoom();
-    final maxZoom = await CamerawesomePlugin.getMaxZoom();
-    if (minZoom == null || maxZoom == null || maxZoom <= minZoom) return;
-    if (minZoom < 1.0 && maxZoom >= 1.0) {
-      final oneXLinearZoom =
-          ((1.0 - minZoom) / (maxZoom - minZoom)).clamp(0.0, 1.0).toDouble();
-      if (oneXLinearZoom > 0.0) {
-        await setZoom(oneXLinearZoom);
-      }
-    }
-  }
 
   /// Set manually the [FlashMode] between
   /// [FlashMode.none] no flash

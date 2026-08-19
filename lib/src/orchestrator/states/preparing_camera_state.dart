@@ -67,54 +67,63 @@ class PreparingCameraState extends CameraState {
   }) async {
     // wait user accept permissions to init widget completely on android
     if (Platform.isAndroid) {
-      _permissionStreamSub = CamerawesomePlugin.listenPermissionResult()!.listen((res) {
-        if (res && !_isReady) {
-          _init(
-            enableImageStream: enableImageStream,
-            enablePhysicalButton: enablePhysicalButton,
-          );
-        }
-        if (onPermissionsResult != null) {
-          onPermissionsResult!(res);
-        }
-      });
+      _permissionStreamSub =
+          CamerawesomePlugin.listenPermissionResult()!.listen(
+        (res) {
+          if (res && !_isReady) {
+            _init(
+              enableImageStream: enableImageStream,
+              enablePhysicalButton: enablePhysicalButton,
+            );
+          }
+          if (onPermissionsResult != null) {
+            onPermissionsResult!(res);
+          }
+        },
+      );
     }
-    final grantedPermissions = await CamerawesomePlugin.checkAndRequestPermissions(
+    final grantedPermissions =
+        await CamerawesomePlugin.checkAndRequestPermissions(
       cameraContext.exifPreferences.saveGPSLocation,
       checkCameraPermissions: true,
-      checkMicrophonePermissions: cameraContext.initialCaptureMode == CaptureMode.video,
+      checkMicrophonePermissions:
+          cameraContext.initialCaptureMode == CaptureMode.video,
     );
     if (cameraContext.exifPreferences.saveGPSLocation &&
-        !(grantedPermissions?.contains(CamerAwesomePermission.location) == true)) {
+        !(grantedPermissions?.contains(CamerAwesomePermission.location) ==
+            true)) {
       cameraContext.exifPreferences = ExifPreferences(saveGPSLocation: false);
-      cameraContext.state.when(
-        onPhotoMode: (pm) => pm.shouldSaveGpsLocation(false),
-      );
+      cameraContext.state
+          .when(onPhotoMode: (pm) => pm.shouldSaveGpsLocation(false));
     }
     if (onPermissionsResult != null) {
       onPermissionsResult!(
-        grantedPermissions?.hasRequiredPermissions() == true,
-      );
+          grantedPermissions?.hasRequiredPermissions() == true);
     }
   }
 
   void initPhysicalButton() {
     _physicalButtonStreamSub?.cancel();
-    _physicalButtonStreamSub = CamerawesomePlugin.listenPhysicalButton()!.listen((res) async {
-      if (res == CameraPhysicalButton.volume_down || res == CameraPhysicalButton.volume_up) {
-        cameraContext.state.when(
-          onPhotoMode: (pm) => pm.takePhoto(),
-          onVideoMode: (vm) => vm.startRecording(),
-          onVideoRecordingMode: (vrm) => vrm.stopRecording(),
-        );
-      }
-    });
+    _physicalButtonStreamSub =
+        CamerawesomePlugin.listenPhysicalButton()!.listen(
+      (res) async {
+        if (res == CameraPhysicalButton.volume_down ||
+            res == CameraPhysicalButton.volume_up) {
+          cameraContext.state.when(
+            onPhotoMode: (pm) => pm.takePhoto(),
+            onVideoMode: (vm) => vm.startRecording(),
+            onVideoRecordingMode: (vrm) => vrm.stopRecording(),
+          );
+        }
+      },
+    );
   }
 
   @override
   void setState(CaptureMode captureMode) {
     throw CameraNotReadyException(
-      message: '''You can't change current state while camera is in PreparingCameraState''',
+      message:
+          '''You can't change current state while camera is in PreparingCameraState''',
     );
   }
 
@@ -128,11 +137,6 @@ class PreparingCameraState extends CameraState {
       enableImageStream: cameraContext.imageAnalysisEnabled,
       enablePhysicalButton: cameraContext.enablePhysicalButton,
     );
-    await sensorConfig.setZoomToOneX(onlyIfUnset: true);
-    // Start camera BEFORE changing state to ensure frames are flowing
-    // when the UI shows the record button. The native start() method
-    // blocks until the first frame is received.
-    await CamerawesomePlugin.start();
     cameraContext.changeState(VideoCameraState.from(cameraContext));
 
     return CamerawesomePlugin.start();
@@ -144,10 +148,6 @@ class PreparingCameraState extends CameraState {
       enableImageStream: cameraContext.imageAnalysisEnabled,
       enablePhysicalButton: cameraContext.enablePhysicalButton,
     );
-    await sensorConfig.setZoomToOneX(onlyIfUnset: true);
-    // Start camera BEFORE changing state to ensure frames are flowing.
-    // The native start() method blocks until the first frame is received.
-    await CamerawesomePlugin.start();
     cameraContext.changeState(PhotoCameraState.from(cameraContext));
 
     return CamerawesomePlugin.start();
@@ -159,10 +159,6 @@ class PreparingCameraState extends CameraState {
       enableImageStream: cameraContext.imageAnalysisEnabled,
       enablePhysicalButton: cameraContext.enablePhysicalButton,
     );
-    await sensorConfig.setZoomToOneX(onlyIfUnset: true);
-    // Start camera BEFORE changing state to ensure frames are flowing.
-    // The native start() method blocks until the first frame is received.
-    await CamerawesomePlugin.start();
     cameraContext.changeState(PreviewCameraState.from(cameraContext));
 
     return CamerawesomePlugin.start();

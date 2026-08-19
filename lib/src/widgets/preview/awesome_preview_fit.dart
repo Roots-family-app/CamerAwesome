@@ -156,7 +156,7 @@ class PreviewFitWidget extends StatelessWidget {
         child: Padding(
           padding: previewPadding ?? EdgeInsets.zero,
           child: InteractiveViewer(
-            key: UniqueKey(),
+            key: previewWidgetKey,
             transformationController: transformController,
             scaleEnabled: false,
             constrained: false,

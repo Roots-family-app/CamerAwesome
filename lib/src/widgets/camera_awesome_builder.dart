@@ -371,7 +371,6 @@ class _CameraWidgetBuilder extends State<CameraAwesomeBuilder>
   void didChangeAppLifecycleState(AppLifecycleState state) {
     switch (state) {
       case AppLifecycleState.resumed:
-        _cameraContext.sensorConfig.setZoomToOneX();
         break;
       case AppLifecycleState.inactive:
       case AppLifecycleState.paused:

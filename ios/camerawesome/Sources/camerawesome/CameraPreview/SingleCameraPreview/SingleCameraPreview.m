@@ -305,14 +305,8 @@
       }
     }
   }
-  // FIX: Changed from setAudioIsDisconnected to setVideoIsDisconnected.
-  // VIDEO is what's being switched (brief gap while new camera initializes),
-  // not audio. Setting the wrong flag caused audio timestamps to be offset
-  // while video timestamps weren't compensated for the gap, causing desync.
-  // The videoIsDisconnected flag triggers proper timestamp gap compensation
-  // in VideoController.m's captureOutput method.
-  [_videoController setVideoIsDisconnected:YES];
-
+  [_videoController setAudioIsDisconnected:YES];
+  
   [_captureSession removeOutput:_capturePhotoOutput];
   [_captureSession removeConnection:_captureConnection];
   
@@ -321,11 +315,7 @@
   
   // Init the camera preview with the selected sensor
   [self initCameraPreview:sensor.position];
-
-  // Update VideoController with new capture device to re-apply custom FPS if recording
-  // This fixes audio/video desync when switching cameras during recording with custom FPS
-  [_videoController updateCaptureDevice:_captureDevice];
-
+  
   [self setBestPreviewQuality];
   
   [_captureSession commitConfiguration];
@@ -529,7 +519,7 @@
 /// Record video into the given path
 - (void)recordVideoAtPath:(NSString *)path completion:(nonnull void (^)(FlutterError * _Nullable))completion {
   if (!_videoController.isRecording) {
-    [_videoController recordVideoAtPath:path captureDevice:_captureDevice orientation:_motionController.deviceOrientation audioSetupCallback:^{
+    [_videoController recordVideoAtPath:path captureDevice:_captureDevice orientation:_deviceOrientation audioSetupCallback:^{
       [self setUpCaptureSessionForAudioError:^(NSError *error) {
         completion([FlutterError errorWithCode:@"VIDEO_ERROR" message:@"error when trying to setup audio" details:[error localizedDescription]]);
       }];
@@ -596,7 +586,6 @@
   }
   
   [_captureSession commitConfiguration];
-  completion(@(YES), nil);
 }
 
 # pragma mark - Audio
