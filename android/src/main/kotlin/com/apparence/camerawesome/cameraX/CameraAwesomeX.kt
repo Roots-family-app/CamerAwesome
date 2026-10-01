@@ -718,7 +718,7 @@ class CameraAwesomeX : CameraInterface, FlutterPlugin, ActivityAware {
     override fun setRecordingAudioMode(
         enableAudio: Boolean, callback: (Result<Boolean>) -> Unit
     ) {
-        CoroutineScope(Dispatchers.IO).launch {
+        CoroutineScope(Dispatchers.Main).launch {
             cameraPermissions.requestPermissions(
                 activity!!,
                 listOf(Manifest.permission.RECORD_AUDIO),
@@ -730,7 +730,7 @@ class CameraAwesomeX : CameraInterface, FlutterPlugin, ActivityAware {
                         // No need to update lifecycle, it will be applied on next recording
                     }
                 }
-                Dispatchers.Main.run { callback(Result.success(granted.isNotEmpty())) }
+                callback(Result.success(granted.isNotEmpty()))
             }
         }
     }

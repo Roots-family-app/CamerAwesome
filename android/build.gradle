@@ -121,6 +121,7 @@ android {
 
     sourceSets {
         main.java.srcDirs += 'src/main/kotlin'
+        test.java.srcDirs += 'src/test/kotlin'
     }
 }
 
@@ -139,9 +140,10 @@ dependencies {
 
     testImplementation 'junit:junit:4.13.2'
     // Optional -- Mockito framework
-    testImplementation "org.mockito:mockito-core:5.0.0"
+    testImplementation "org.mockito:mockito-core:5.14.2"
     // Optional -- mockito-kotlin
     testImplementation "org.mockito.kotlin:mockito-kotlin:4.0.0"
+    testImplementation 'org.jetbrains.kotlinx:kotlinx-coroutines-test:1.7.3'
     
 
     def camerax_version = "1.4.2"
