@@ -123,8 +123,10 @@ class CameraPermissions : EventChannel.StreamHandler, RequestPermissionsResultLi
         if (permissionsToAsk.isEmpty()) {
             callback(permissionsGranted)
         } else {
-            // Request the not granted permissions
-            CoroutineScope(Dispatchers.IO).launch {
+            // Request the not granted permissions, on the main thread: Android can report
+            // the result synchronously on the calling thread, and Flutter rejects an
+            // EventSink event sent from any other thread.
+            CoroutineScope(Dispatchers.Main).launch {
                 requestPermissions(activity, permissionsToAsk, PERMISSIONS_MULTIPLE_REQUEST) {
                     callback(permissionsGranted.apply { addAll(it) })
                 }
